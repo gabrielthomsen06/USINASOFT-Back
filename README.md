@@ -3,6 +3,7 @@
 Este repositório contém o backend do UsinaSoft, um sistema de gestão de usinagem construído com Django e Django REST Framework. Ele expõe uma API REST consumida por um frontend (web ou mobile) para gerenciar usuários, clientes, peças, ordens de produção, atividades, comentários e anexos.
 
 ## Sumário
+
 - Sobre o projeto
 - Requisitos
 - Como rodar localmente
@@ -21,6 +22,10 @@ UsinaSoft é uma aplicação para gerenciar o fluxo de produção em uma oficina
 - Criar atividades associadas a OPs/itens/peças
 - Adicionar comentários e anexos às atividades
 - Consultar indicadores agregados de produção
+
+### Funcionalidades Automáticas
+
+- **Criação automática de atividades:** Quando uma nova peça é cadastrada, o sistema automaticamente cria uma atividade de produção com título "Produzir peça {código}" contendo os detalhes da peça (cliente, quantidade, data de entrega) no campo descrição e metadata.
 
 Essa documentação descreve como o frontend deve consumir a API exposta pelo backend.
 
@@ -42,7 +47,7 @@ Usando poetry (recomendado):
 ```bash
 poetry install
 poetry run python manage.py migrate
-poetry run python manage.py createsuperuser  # opcional
+poetry run python manage.py createsuperuser  # Crie um usuário para testar a autenticação
 poetry run python manage.py runserver
 ```
 
@@ -53,7 +58,7 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt  # gere via poetry export se necessário
 python manage.py migrate
-python manage.py createsuperuser  # opcional
+python manage.py createsuperuser  # Crie um usuário para testar a autenticação
 python manage.py runserver
 ```
 
@@ -61,103 +66,236 @@ Padrão de base da API: `http://localhost:8000/api/`
 
 ## Autenticação
 
-No estado atual do projeto a configuração dos ViewSets usa permissões abertas (`AllowAny`) em muitos endpoints. Se o projeto for configurado para usar autenticação (Token, JWT ou Session), o frontend deverá enviar o cabeçalho `Authorization: Bearer <token>` (ou `Token <token>` conforme a configuração).
+A API usa autenticação baseada em JWT (JSON Web Tokens). Todos os endpoints (exceto criação de usuários e login) requerem um token válido no cabeçalho `Authorization`.
 
-## Endpoints principais
+### Como fazer login
 
-Observação: as rotas são registradas com um `DefaultRouter` em `usinasoft/urls.py`. Abaixo estão os principais recursos expostos e os métodos REST suportados (ModelViewSet padrões: GET list, POST create, GET detail, PUT/PATCH update, DELETE destroy quando aplicável).
+Envie uma requisição POST para `/api/auth/token/` com as credenciais:
 
-- /api/usuarios/ [GET, POST]
-  - Listar usuários / criar usuário
-  - Payload (criar): { "email": "user@example.com", "password": "senha", "first_name": "...", "last_name": "..." }
+```json
+{
+  "email": "usuario@example.com",
+  "password": "senha123"
+}
+```
 
-- /api/usuarios/{id}/ [GET, PUT, PATCH, DELETE]
+**Resposta de sucesso:**
 
-- /api/logs/ [GET]
-  - Logs de ações (somente leitura)
+```json
+{
+  "access": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
+  "refresh": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
+}
+```
 
-- /api/clientes/ [GET, POST]
-  - Cliente: { "nome": "Cliente X", "contato": "...", "email": "...", "endereco": "..." }
+### Como usar o token
 
-- /api/clientes/{id}/ [GET, PUT, PATCH, DELETE]
+Inclua o token de acesso no cabeçalho de todas as requisições subsequentes:
 
-- /api/pecas/ [GET, POST]
-  - Peça: { "cliente": <cliente_id>, "codigo": "ABC123", "descricao": "...", "pedido": "...", "quantidade": 10, "data_entrega": "YYYY-MM-DD" }
+```
+Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
+```
 
-- /api/pecas/{id}/ [GET, PUT, PATCH, DELETE]
+### Renovação de token
 
-- /api/ops/ [GET, POST]
-  - Ordem de Produção: campos incluem "numero", "criado_por", "data_inicio_prevista", "data_fim_prevista", "status", "observacoes"
+Quando o token de acesso expirar, use o token de refresh para obter um novo:
 
-- /api/ops/{id}/ [GET, PUT, PATCH, DELETE]
+POST `/api/auth/token/refresh/`
 
-- /api/itens-op/ [GET, POST]
-  - Item de OP: { "ordem": <ordem_id>, "peca": <peca_id>, "quantidade": 100, "lote": "L001" }
+```json
+{
+  "refresh": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
+}
+```
 
-- /api/itens-op/{id}/ [GET, PUT, PATCH, DELETE]
+**Nota:** A criação de usuários (`POST /api/usuarios/`) não requer autenticação para permitir registro inicial.
 
-- /api/indicadores/summary/ [GET]
-  - Endpoint custom para agregar indicadores de Ordens de Produção.
-  - Query params (opcionais): `start` (YYYY-MM-DD), `end` (YYYY-MM-DD), `date_field` (data_fim_prevista | data_inicio_prevista | created_at)
-  - Exemplo de resposta:
-    {
-      "periodo": {"start":"2025-01-01","end":"2025-01-31","date_field":"data_fim_prevista"},
-      "total": 150,
-      "por_status": {"aberta":10,"em_andamento":45,"pausada":5,"concluida":85,"cancelada":5},
-      "agrupado": {"emFila":10,"emAndamento":50,"concluidas":85}
-    }
+### Testando a autenticação
 
-- /api/atividades/ [GET, POST]
-  - Atividade: campos incluem "titulo", "descricao", "responsavel" (user id), "ordem" (ordem id), "ordem_item" (item id), "peca" (peca id), "status", "prioridade", "data_inicio", "data_fim", "posicao", "metadata"
+1. **Crie um usuário** (não requer auth):
 
-- /api/atividades/{id}/ [GET, PUT, PATCH, DELETE]
+   ```bash
+   curl -X POST http://localhost:8000/api/usuarios/ \
+     -H "Content-Type: application/json" \
+     -d '{"email": "teste@example.com", "password": "senha123", "first_name": "Teste", "last_name": "User"}'
+   ```
 
-- /api/comentarios/ [GET, POST]
-  - Comentário: { "atividade": <atividade_id>, "autor": <usuario_id>, "texto": "..." }
+2. **Faça login** para obter tokens:
 
-- /api/comentarios/{id}/ [GET, PUT, PATCH, DELETE]
+   ```bash
+   curl -X POST http://localhost:8000/api/auth/token/ \
+     -H "Content-Type: application/json" \
+     -d '{"email": "teste@example.com", "password": "senha123"}'
+   ```
 
-- /api/anexos/ [GET, POST]
-  - Anexo: campos incluem "content_type" (id do ContentType), "object_id", "arquivo_path" (ou use upload via endpoint custom no futuro), "nome_original", "mime_type", "tamanho", "criado_por"
+3. **Use o token** em requisições autenticadas:
+   ```bash
+   curl -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+     http://localhost:8000/api/pecas/
+   ```
 
-- /api/anexos/{id}/ [GET, PUT, PATCH, DELETE]
+## Endpoints da API
 
+### Autenticação
+
+| Método | Endpoint                   | Descrição                                    |
+| ------ | -------------------------- | -------------------------------------------- |
+| `POST` | `/api/auth/token/`         | Obter tokens de acesso e refresh (login)     |
+| `POST` | `/api/auth/token/refresh/` | Renovar token de acesso usando refresh token |
+
+### Usuários
+
+| Método   | Endpoint              | Descrição                                    |
+| -------- | --------------------- | -------------------------------------------- |
+| `GET`    | `/api/usuarios/`      | Listar todos os usuários                     |
+| `POST`   | `/api/usuarios/`      | Criar novo usuário (não requer autenticação) |
+| `GET`    | `/api/usuarios/{id}/` | Detalhes de um usuário específico            |
+| `PUT`    | `/api/usuarios/{id}/` | Atualizar usuário completamente              |
+| `PATCH`  | `/api/usuarios/{id}/` | Atualizar usuário parcialmente               |
+| `DELETE` | `/api/usuarios/{id}/` | Excluir usuário                              |
+
+### Logs de Ação
+
+| Método | Endpoint     | Descrição                       |
+| ------ | ------------ | ------------------------------- |
+| `GET`  | `/api/logs/` | Listar logs de ações do sistema |
+
+### Clientes
+
+| Método   | Endpoint              | Descrição                         |
+| -------- | --------------------- | --------------------------------- |
+| `GET`    | `/api/clientes/`      | Listar todos os clientes          |
+| `POST`   | `/api/clientes/`      | Criar novo cliente                |
+| `GET`    | `/api/clientes/{id}/` | Detalhes de um cliente específico |
+| `PUT`    | `/api/clientes/{id}/` | Atualizar cliente completamente   |
+| `PATCH`  | `/api/clientes/{id}/` | Atualizar cliente parcialmente    |
+| `DELETE` | `/api/clientes/{id}/` | Excluir cliente                   |
+
+### Peças
+
+| Método   | Endpoint           | Descrição                       |
+| -------- | ------------------ | ------------------------------- |
+| `GET`    | `/api/pecas/`      | Listar todas as peças           |
+| `POST`   | `/api/pecas/`      | Criar nova peça                 |
+| `GET`    | `/api/pecas/{id}/` | Detalhes de uma peça específica |
+| `PUT`    | `/api/pecas/{id}/` | Atualizar peça completamente    |
+| `PATCH`  | `/api/pecas/{id}/` | Atualizar peça parcialmente     |
+| `DELETE` | `/api/pecas/{id}/` | Excluir peça                    |
+
+### Ordens de Produção (OPs)
+
+| Método   | Endpoint         | Descrição                          |
+| -------- | ---------------- | ---------------------------------- |
+| `GET`    | `/api/ops/`      | Listar todas as ordens de produção |
+| `POST`   | `/api/ops/`      | Criar nova ordem de produção       |
+| `GET`    | `/api/ops/{id}/` | Detalhes de uma OP específica      |
+| `PUT`    | `/api/ops/{id}/` | Atualizar OP completamente         |
+| `PATCH`  | `/api/ops/{id}/` | Atualizar OP parcialmente          |
+| `DELETE` | `/api/ops/{id}/` | Excluir OP                         |
+
+### Itens de Ordem de Produção
+
+| Método   | Endpoint              | Descrição                      |
+| -------- | --------------------- | ------------------------------ |
+| `GET`    | `/api/itens-op/`      | Listar todos os itens de OP    |
+| `POST`   | `/api/itens-op/`      | Criar novo item de OP          |
+| `GET`    | `/api/itens-op/{id}/` | Detalhes de um item específico |
+| `PUT`    | `/api/itens-op/{id}/` | Atualizar item completamente   |
+| `PATCH`  | `/api/itens-op/{id}/` | Atualizar item parcialmente    |
+| `DELETE` | `/api/itens-op/{id}/` | Excluir item                   |
+
+### Indicadores
+
+| Método | Endpoint                    | Descrição                         |
+| ------ | --------------------------- | --------------------------------- |
+| `GET`  | `/api/indicadores/summary/` | Resumo de indicadores de produção |
+
+### Atividades
+
+| Método   | Endpoint                | Descrição                            |
+| -------- | ----------------------- | ------------------------------------ |
+| `GET`    | `/api/atividades/`      | Listar todas as atividades           |
+| `POST`   | `/api/atividades/`      | Criar nova atividade                 |
+| `GET`    | `/api/atividades/{id}/` | Detalhes de uma atividade específica |
+| `PUT`    | `/api/atividades/{id}/` | Atualizar atividade completamente    |
+| `PATCH`  | `/api/atividades/{id}/` | Atualizar atividade parcialmente     |
+| `DELETE` | `/api/atividades/{id}/` | Excluir atividade                    |
+
+### Comentários
+
+| Método   | Endpoint                 | Descrição                            |
+| -------- | ------------------------ | ------------------------------------ |
+| `GET`    | `/api/comentarios/`      | Listar todos os comentários          |
+| `POST`   | `/api/comentarios/`      | Criar novo comentário                |
+| `GET`    | `/api/comentarios/{id}/` | Detalhes de um comentário específico |
+| `PUT`    | `/api/comentarios/{id}/` | Atualizar comentário completamente   |
+| `PATCH`  | `/api/comentarios/{id}/` | Atualizar comentário parcialmente    |
+| `DELETE` | `/api/comentarios/{id}/` | Excluir comentário                   |
+
+### Anexos
+
+| Método   | Endpoint            | Descrição                       |
+| -------- | ------------------- | ------------------------------- |
+| `GET`    | `/api/anexos/`      | Listar todos os anexos          |
+| `POST`   | `/api/anexos/`      | Criar novo anexo                |
+| `GET`    | `/api/anexos/{id}/` | Detalhes de um anexo específico |
+| `PUT`    | `/api/anexos/{id}/` | Atualizar anexo completamente   |
+| `PATCH`  | `/api/anexos/{id}/` | Atualizar anexo parcialmente    |
+| `DELETE` | `/api/anexos/{id}/` | Excluir anexo                   |
+
+### Parâmetros de Query Comuns
+
+- `?page=N` - Paginação (padrão: 100 itens por página)
+- `?ordering=campo` - Ordenação (use `-campo` para decrescente)
+
+### Parâmetros Específicos do Endpoint de Indicadores
+
+- `?start=YYYY-MM-DD` - Data inicial do período
+- `?end=YYYY-MM-DD` - Data final do período
+- `?date_field=campo` - Campo de data para filtro (`data_fim_prevista`, `data_inicio_prevista`, `created_at`)
 
 ## Exemplos para o frontend
 
 Exemplo usando fetch (criar usuário):
 
 ```javascript
-fetch('http://localhost:8000/api/usuarios/', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
+fetch("http://localhost:8000/api/usuarios/", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
   body: JSON.stringify({
-    email: 'user@example.com',
-    password: 'senha123',
-    first_name: 'João',
-    last_name: 'Silva'
-  })
+    email: "user@example.com",
+    password: "senha123",
+    first_name: "João",
+    last_name: "Silva",
+  }),
 })
-.then(r => r.json())
-.then(data => console.log(data))
+  .then((r) => r.json())
+  .then((data) => console.log(data));
 ```
 
 Exemplo usando axios (listar peças):
 
 ```javascript
-import axios from 'axios'
+import axios from "axios";
 
-axios.get('http://localhost:8000/api/pecas/')
-  .then(resp => console.log(resp.data))
-  .catch(err => console.error(err))
+axios
+  .get("http://localhost:8000/api/pecas/")
+  .then((resp) => console.log(resp.data))
+  .catch((err) => console.error(err));
 ```
 
 Consulta de indicadores com parâmetros de data:
 
 ```javascript
-axios.get('http://localhost:8000/api/indicadores/summary/', {
-  params: { start: '2025-01-01', end: '2025-01-31', date_field: 'data_fim_prevista' }
-}).then(r => console.log(r.data))
+axios
+  .get("http://localhost:8000/api/indicadores/summary/", {
+    params: {
+      start: "2025-01-01",
+      end: "2025-01-31",
+      date_field: "data_fim_prevista",
+    },
+  })
+  .then((r) => console.log(r.data));
 ```
 
 Upload de arquivos / anexos
@@ -167,19 +305,19 @@ No momento a API expõe o `AnexoSerializer` com campos descritivos; se precisar 
 Exemplo básico usando FormData:
 
 ```javascript
-const fd = new FormData()
-fd.append('criado_por', 1)
-fd.append('object_id', 123)
-fd.append('content_type', 7) // id do ContentType
-fd.append('arquivo', fileInput.files[0]) // se houver suporte de upload
+const fd = new FormData();
+fd.append("criado_por", 1);
+fd.append("object_id", 123);
+fd.append("content_type", 7); // id do ContentType
+fd.append("arquivo", fileInput.files[0]); // se houver suporte de upload
 
-fetch('http://localhost:8000/api/anexos/', {
-  method: 'POST',
+fetch("http://localhost:8000/api/anexos/", {
+  method: "POST",
   body: fd,
   // não setar Content-Type, o browser define boundary
 })
-.then(r => r.json())
-.then(d => console.log(d))
+  .then((r) => r.json())
+  .then((d) => console.log(d));
 ```
 
 ## Convenções e dicas
@@ -188,3 +326,11 @@ fetch('http://localhost:8000/api/anexos/', {
 - Filtros, paginação e ordenação podem ser habilitados no backend. Atualmente os ViewSets definem `queryset` com ordenação padrão.
 - Campos read-only: muitos serializers incluem campos de leitura como `created_at`, `updated_at`, e campos derivados (ex.: `cliente_nome`, `peca_codigo`). Não envie esses campos no POST/PUT.
 - Para listar relações, envie apenas os IDs das entidades relacionadas (ex.: `cliente: 3`, `peca: 12`).
+
+## Mudanças Recentes
+
+- **Criação automática de atividades:** Implementada funcionalidade onde o cadastro de uma nova peça automaticamente cria uma atividade de produção associada.
+- **Autenticação JWT implementada:** Todos os endpoints agora requerem autenticação, exceto criação de usuários e login.
+- **Endpoints de autenticação:** `/api/auth/token/` (login) e `/api/auth/token/refresh/` (renovar token).
+- **Pacotes atualizados:** Removidos pacotes desnecessários, mantido apenas `djangorestframework-simplejwt` para JWT.
+- **Indicadores aprimorados:** Endpoint `/api/indicadores/summary/` agora retorna todos os status com percentuais calculados.
