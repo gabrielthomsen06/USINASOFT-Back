@@ -1,30 +1,26 @@
-from django.db.models.signals import post_save
+from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 from .models import Peca
-from atividades.models import Atividade
 
 
 @receiver(post_save, sender=Peca)
-def criar_atividade_para_peca(sender, instance, created, **kwargs):
+def atualizar_status_op_ao_salvar_peca(sender, instance, created, **kwargs):
     """
-    Cria automaticamente uma atividade quando uma nova peça é cadastrada.
+    Signal que atualiza o status da OP quando uma peça é salva.
+
+    Quando uma peça muda de status (especialmente para 'concluida' ou 'em_andamento'),
+    verifica se todas as peças da OP estão concluídas e atualiza o status da OP.
     """
-    if created:  # Apenas para novas peças (não para atualizações)
-        # Cria uma atividade para produção da peça
-        Atividade.objects.create(
-            titulo=f"Produzir peça {instance.codigo}",
-            descricao=f"Produção da peça: {instance.descricao or 'Sem descrição'}\n"
-            f"Cliente: {instance.cliente.nome}\n"
-            f"Quantidade: {instance.quantidade}\n"
-            f"Data de entrega: {instance.data_entrega or 'Não definida'}",
-            peca=instance,
-            status=Atividade.StatusChoices.NA_FILA,
-            prioridade=1,  # Prioridade média
-            metadata={
-                "tipo": "producao_peca",
-                "peca_codigo": instance.codigo,
-                "cliente_nome": instance.cliente.nome,
-                "quantidade": instance.quantidade,
-                "data_entrega": str(instance.data_entrega) if instance.data_entrega else None,
-            },
-        )
+    if instance.ordem_producao:
+        instance.ordem_producao.verificar_e_atualizar_status()
+
+
+@receiver(post_delete, sender=Peca)
+def atualizar_status_op_ao_deletar_peca(sender, instance, **kwargs):
+    """
+    Signal que atualiza o status da OP quando uma peça é deletada.
+
+    Recalcula o status da OP após a remoção de uma peça.
+    """
+    if instance.ordem_producao:
+        instance.ordem_producao.verificar_e_atualizar_status()

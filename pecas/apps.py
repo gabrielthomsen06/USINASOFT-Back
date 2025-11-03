@@ -7,5 +7,5 @@ class PecasConfig(AppConfig):
     verbose_name = "Peças"
 
     def ready(self):
-        # Importa os sinais quando o app é carregado
+        """Importa os signals quando o app é carregado."""
         import pecas.signals

@@ -1,40 +1,31 @@
 from rest_framework import viewsets
-from rest_framework.permissions import AllowAny
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view
 from rest_framework.response import Response
-from django.db.models import Count, Q
+from django.db.models import Count, Avg, F
 from django.utils import timezone
 from datetime import date, timedelta
-from .models import OrdemProducao, OrdemProducaoItem
-from .serializers import OrdemProducaoSerializer, OrdemProducaoItemSerializer
+from .models import OrdemProducao
+from .serializers import OrdemProducaoSerializer
 
 
 class OrdemProducaoViewSet(viewsets.ModelViewSet):
-    queryset = OrdemProducao.objects.all().order_by("-created_at")
+    queryset = OrdemProducao.objects.select_related("cliente").all().order_by("-created_at")
     serializer_class = OrdemProducaoSerializer
 
 
-class OrdemProducaoItemViewSet(viewsets.ModelViewSet):
-    queryset = (
-        OrdemProducaoItem.objects.select_related("ordem", "peca").all().order_by("-created_at")
-    )
-    serializer_class = OrdemProducaoItemSerializer
-
-
 @api_view(["GET"])
-@permission_classes([AllowAny])
 def indicadores_summary(request):
-
+    """
+    Retorna indicadores agregados de produção baseados em OPs e peças.
+    """
     end_date = request.GET.get("end")
     start_date = request.GET.get("start")
-    date_field = request.GET.get("date_field", "data_fim_prevista")
+    date_field = request.GET.get("date_field", "created_at")
 
     # Validar date_field
-    if date_field not in ["data_fim_prevista", "created_at", "data_inicio_prevista"]:
+    if date_field not in ["created_at", "updated_at"]:
         return Response(
-            {
-                "error": f"date_field inválido. Use: data_fim_prevista, data_inicio_prevista ou created_at"
-            },
+            {"error": f"date_field inválido. Use: created_at ou updated_at"},
             status=400,
         )
 
@@ -56,51 +47,43 @@ def indicadores_summary(request):
             {"error": f"Formato de data inválido. Use YYYY-MM-DD. Detalhes: {str(e)}"}, status=400
         )
 
-    # Construir filtro dinâmico
-    # Se usar created_at (DateTimeField), comparar com datas no início/fim do dia
-    if date_field == "created_at":
-        from datetime import datetime, time
+    # Construir filtro para DateTimeField
+    from datetime import datetime, time
 
-        tz = timezone.get_current_timezone()
-        start_datetime = datetime.combine(start_date, time.min)
-        end_datetime = datetime.combine(end_date, time.max)
+    tz = timezone.get_current_timezone()
+    start_datetime = datetime.combine(start_date, time.min)
+    end_datetime = datetime.combine(end_date, time.max)
 
-        if timezone.is_naive(start_datetime):
-            start_datetime = timezone.make_aware(start_datetime, timezone=tz)
-        if timezone.is_naive(end_datetime):
-            end_datetime = timezone.make_aware(end_datetime, timezone=tz)
+    if timezone.is_naive(start_datetime):
+        start_datetime = timezone.make_aware(start_datetime, timezone=tz)
+    if timezone.is_naive(end_datetime):
+        end_datetime = timezone.make_aware(end_datetime, timezone=tz)
 
-        filter_kwargs = {
-            f"{date_field}__gte": start_datetime,
-            f"{date_field}__lte": end_datetime,
-        }
-    else:
-        # DateField: usar comparação direta
-        filter_kwargs = {
-            f"{date_field}__gte": start_date,
-            f"{date_field}__lte": end_date,
-        }
+    filter_kwargs = {
+        f"{date_field}__gte": start_datetime,
+        f"{date_field}__lte": end_datetime,
+    }
 
     # Queryset base
     qs = OrdemProducao.objects.filter(**filter_kwargs)
 
-    # Agregação por status (resulta apenas nos status encontrados)
+    # Agregação por status de OP
     agregacao = qs.values("status").annotate(total=Count("id")).order_by("status")
     agregacao_dict = {item["status"]: item["total"] for item in agregacao}
 
-    # Garantir a presença de todos os status possíveis, mesmo com zero ocorrências
+    # Garantir todos os status
     status_choices = dict(OrdemProducao.StatusChoices.choices)
     por_status = {status: agregacao_dict.get(status, 0) for status in status_choices.keys()}
 
-    # Total geral
-    total = sum(por_status.values())
+    # Total de OPs
+    total_ops = sum(por_status.values())
 
-    # Lista detalhada para facilitar a renderização no frontend
+    # Detalhes por status
     detalhes_por_status = []
     for status, label in status_choices.items():
         quantidade = por_status[status]
-        percentual = round((quantidade / total) * 100, 2) if total else 0.0
-        detalhes_por_status.append(  # fornece dados tabulados para o frontend
+        percentual = round((quantidade / total_ops) * 100, 2) if total_ops else 0.0
+        detalhes_por_status.append(
             {
                 "status": status,
                 "rotulo": label,
@@ -109,12 +92,28 @@ def indicadores_summary(request):
             }
         )
 
-    # Agrupamento simplificado para o frontend (mantido para compatibilidade)
-    agrupado = {
-        "emFila": por_status.get("aberta", 0),
-        "emAndamento": por_status.get("em_andamento", 0) + por_status.get("pausada", 0),
-        "concluidas": por_status.get("concluida", 0),
-    }
+    # Calcular tempo médio de produção (entre criação e conclusão)
+    ops_concluidas = qs.filter(status="concluida")
+    if ops_concluidas.exists():
+        tempo_medio_segundos = ops_concluidas.annotate(
+            duracao=F("updated_at") - F("created_at")
+        ).aggregate(media=Avg("duracao"))["media"]
+
+        if tempo_medio_segundos:
+            tempo_medio_dias = tempo_medio_segundos.total_seconds() / (60 * 60 * 24)
+        else:
+            tempo_medio_dias = 0
+    else:
+        tempo_medio_dias = 0
+
+    # Estatísticas de peças
+    from pecas.models import Peca
+
+    pecas_qs = Peca.objects.filter(ordem_producao__in=qs)
+    total_pecas = pecas_qs.count()
+
+    pecas_por_status = pecas_qs.values("status").annotate(total=Count("id"))
+    pecas_status_dict = {item["status"]: item["total"] for item in pecas_por_status}
 
     return Response(
         {
@@ -123,9 +122,15 @@ def indicadores_summary(request):
                 "end": end_date.isoformat(),
                 "date_field": date_field,
             },
-            "total": total,
-            "por_status": por_status,
-            "detalhes_por_status": detalhes_por_status,
-            "agrupado": agrupado,
+            "ordens_producao": {
+                "total": total_ops,
+                "por_status": por_status,
+                "detalhes_por_status": detalhes_por_status,
+                "tempo_medio_producao_dias": round(tempo_medio_dias, 2),
+            },
+            "pecas": {
+                "total": total_pecas,
+                "por_status": pecas_status_dict,
+            },
         }
     )

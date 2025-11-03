@@ -1,47 +1,36 @@
 from rest_framework import serializers
-from .models import OrdemProducao, OrdemProducaoItem
+from .models import OrdemProducao
 
 
 class OrdemProducaoSerializer(serializers.ModelSerializer):
     criado_por_email = serializers.ReadOnlyField(source="criado_por.email")
+    cliente_nome = serializers.ReadOnlyField(source="cliente.nome")
+    total_pecas = serializers.ReadOnlyField()
+    pecas_concluidas = serializers.ReadOnlyField()
+    percentual_conclusao = serializers.ReadOnlyField()
 
     class Meta:
         model = OrdemProducao
         fields = [
             "id",
-            "numero",
+            "codigo",
+            "cliente",
+            "cliente_nome",
             "criado_por",
             "criado_por_email",
-            "data_criacao",
-            "data_inicio_prevista",
-            "data_fim_prevista",
             "status",
             "observacoes",
+            "total_pecas",
+            "pecas_concluidas",
+            "percentual_conclusao",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "data_criacao", "created_at", "updated_at"]
-
-
-class OrdemProducaoItemSerializer(serializers.ModelSerializer):
-    ordem_numero = serializers.ReadOnlyField(source="ordem.numero")
-    peca_codigo = serializers.ReadOnlyField(source="peca.codigo")
-    percentual_concluido = serializers.ReadOnlyField()
-
-    class Meta:
-        model = OrdemProducaoItem
-        fields = [
+        read_only_fields = [
             "id",
-            "ordem",
-            "ordem_numero",
-            "peca",
-            "peca_codigo",
-            "quantidade",
-            "quantidade_produzida",
-            "percentual_concluido",
-            "status",
-            "lote",
+            "total_pecas",
+            "pecas_concluidas",
+            "percentual_conclusao",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "percentual_concluido", "created_at", "updated_at"]

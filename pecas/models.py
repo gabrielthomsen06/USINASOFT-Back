@@ -33,12 +33,19 @@ class Peca(models.Model):
     """
 
     class StatusChoices(models.TextChoices):
-        NOVO = "novo", "Novo"
-        EM_PRODUCAO = "em_producao", "Em Produção"
-        CONCLUIDO = "concluido", "Concluído"
-        CANCELADO = "cancelado", "Cancelado"
+        EM_FILA = "em_fila", "Em Fila"
+        EM_ANDAMENTO = "em_andamento", "Em Andamento"
+        PAUSADA = "pausada", "Pausada"
+        CONCLUIDA = "concluida", "Concluída"
+        CANCELADA = "cancelada", "Cancelada"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    ordem_producao = models.ForeignKey(
+        "producao.OrdemProducao",
+        on_delete=models.CASCADE,
+        related_name="pecas",
+        verbose_name="Ordem de Produção",
+    )
     cliente = models.ForeignKey(
         Cliente, on_delete=models.PROTECT, related_name="pecas", verbose_name="Cliente"
     )
@@ -52,7 +59,7 @@ class Peca(models.Model):
     status = models.CharField(
         max_length=30,
         choices=StatusChoices.choices,
-        default=StatusChoices.NOVO,
+        default=StatusChoices.EM_FILA,
         verbose_name="Status",
     )
     metadata = models.JSONField(blank=True, null=True, verbose_name="Metadados")
@@ -68,6 +75,7 @@ class Peca(models.Model):
             models.Index(fields=["status"]),
             models.Index(fields=["data_entrega"]),
             models.Index(fields=["cliente", "status"]),
+            models.Index(fields=["ordem_producao"]),
         ]
 
     def __str__(self):
