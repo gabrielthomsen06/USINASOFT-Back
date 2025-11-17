@@ -12,6 +12,11 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 
 from pathlib import Path
 import os
+import dj_database_url
+from dotenv import load_dotenv
+
+# Carregar variáveis de ambiente do arquivo .env
+load_dotenv()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -24,9 +29,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.environ.get("SECRET_KEY", "django-insecure-change-this-in-production")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.environ.get("DEBUG", "True") == "True"
+DEBUG = os.environ.get("DEBUG", "False") == "True"
 
-ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "*").split(",")
+ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 
 
 # Application definition
@@ -50,6 +55,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",  # Servir arquivos estáticos em produção
     "django.contrib.sessions.middleware.SessionMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -83,26 +89,31 @@ WSGI_APPLICATION = "usinasoft.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
 
-# PostgreSQL é recomendado para produção
-# Para desenvolvimento, pode-se usar SQLite (padrão abaixo)
-DATABASES = {
-    "default": {
-        "ENGINE": os.environ.get("DB_ENGINE", "django.db.backends.sqlite3"),
-        "NAME": os.environ.get("DB_NAME", BASE_DIR / "db.sqlite3"),
-        "USER": os.environ.get("DB_USER", ""),
-        "PASSWORD": os.environ.get("DB_PASSWORD", ""),
-        "HOST": os.environ.get("DB_HOST", ""),
-        "PORT": os.environ.get("DB_PORT", ""),
-    }
-}
+# Use DATABASE_URL environment variable for production (DigitalOcean, Heroku, etc)
+# Format: postgresql://user:password@host:port/dbname
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
-# Para PostgreSQL, configure as variáveis de ambiente:
-# DB_ENGINE=django.db.backends.postgresql
-# DB_NAME=usinasoft
-# DB_USER=postgres
-# DB_PASSWORD=sua_senha
-# DB_HOST=localhost
-# DB_PORT=5432
+if DATABASE_URL:
+    # Production: Use DATABASE_URL if provided
+    DATABASES = {
+        "default": dj_database_url.config(
+            default=DATABASE_URL,
+            conn_max_age=600,
+            conn_health_checks=True,
+        )
+    }
+else:
+    # Development: Use individual environment variables or SQLite
+    DATABASES = {
+        "default": {
+            "ENGINE": os.environ.get("DB_ENGINE", "django.db.backends.sqlite3"),
+            "NAME": os.environ.get("DB_NAME", BASE_DIR / "db.sqlite3"),
+            "USER": os.environ.get("DB_USER", ""),
+            "PASSWORD": os.environ.get("DB_PASSWORD", ""),
+            "HOST": os.environ.get("DB_HOST", ""),
+            "PORT": os.environ.get("DB_PORT", ""),
+        }
+    }
 
 
 # Password validation
@@ -142,6 +153,9 @@ USE_TZ = True
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
+# WhiteNoise configuration for efficient static file serving in production
+STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+
 # Media files
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
@@ -167,5 +181,22 @@ REST_FRAMEWORK = {
     ],
 }
 
-# CORS Headers (para desenvolvimento)
-CORS_ALLOW_ALL_ORIGINS = True
+# CORS Headers
+# Em produção, especifique os domínios permitidos
+if DEBUG:
+    # Desenvolvimento: Permitir todos os domínios
+    CORS_ALLOW_ALL_ORIGINS = True
+else:
+    # Produção: Apenas domínios específicos
+    CORS_ALLOWED_ORIGINS = os.environ.get(
+        "CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8000"
+    ).split(",")
+
+# Security settings for production
+if not DEBUG:
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_BROWSER_XSS_FILTER = True
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
