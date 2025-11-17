@@ -32,6 +32,14 @@ class OrdemProducao(models.Model):
         related_name="ops_criadas",
         verbose_name="Criado por",
     )
+    responsavel = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="ops_responsavel",
+        verbose_name="Responsável",
+    )
     status = models.CharField(
         max_length=30,
         choices=StatusChoices.choices,
