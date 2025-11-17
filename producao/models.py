@@ -12,7 +12,9 @@ class OrdemProducao(models.Model):
     class StatusChoices(models.TextChoices):
         ABERTA = "aberta", "Aberta"
         EM_ANDAMENTO = "em_andamento", "Em Andamento"
+        PAUSADA = "pausada", "Pausada"
         CONCLUIDA = "concluida", "Concluída"
+        CANCELADA = "cancelada", "Cancelada"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     codigo = models.CharField(
@@ -87,7 +89,12 @@ class OrdemProducao(models.Model):
         Verifica o estado das peças e atualiza o status da OP automaticamente:
         - Se todas as peças estão concluídas -> status = 'concluida'
         - Se pelo menos uma peça está em andamento -> status = 'em_andamento'
+        - Se todas as peças estão canceladas -> status = 'cancelada'
+        - Se todas as peças estão pausadas -> status = 'pausada'
         - Caso contrário -> mantém status atual
+
+        Nota: O status da OP pode ser definido manualmente via API, este método
+        apenas sugere atualizações automáticas baseadas nas peças.
         """
         total = self.total_pecas
 
@@ -97,12 +104,20 @@ class OrdemProducao(models.Model):
 
         concluidas = self.pecas_concluidas
         em_andamento = self.pecas.filter(status="em_andamento").count()
+        canceladas = self.pecas.filter(status="cancelada").count()
+        pausadas = self.pecas.filter(status="pausada").count()
 
         status_anterior = self.status
 
         # Se todas as peças estão concluídas
         if concluidas == total:
             self.status = self.StatusChoices.CONCLUIDA
+        # Se todas as peças estão canceladas
+        elif canceladas == total:
+            self.status = self.StatusChoices.CANCELADA
+        # Se todas as peças estão pausadas
+        elif pausadas == total:
+            self.status = self.StatusChoices.PAUSADA
         # Se pelo menos uma peça está em andamento
         elif em_andamento > 0:
             self.status = self.StatusChoices.EM_ANDAMENTO
