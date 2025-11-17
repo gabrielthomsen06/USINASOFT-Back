@@ -4,6 +4,7 @@ from .models import Usuario, LogAcao
 
 class UsuarioSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=False, allow_blank=False)
+    full_name = serializers.CharField(source="get_full_name", read_only=True)
 
     class Meta:
         model = Usuario
@@ -13,16 +14,30 @@ class UsuarioSerializer(serializers.ModelSerializer):
             "password",
             "first_name",
             "last_name",
+            "full_name",
             "is_active",
             "is_staff",
             "is_superuser",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "is_staff", "is_superuser", "created_at", "updated_at"]
+        read_only_fields = [
+            "id",
+            "full_name",
+            "is_staff",
+            "is_superuser",
+            "created_at",
+            "updated_at",
+        ]
 
     def create(self, validated_data):
         password = validated_data.pop("password", None)
+
+        # Todo usuário criado via API é admin por padrão
+        validated_data.setdefault("is_staff", True)
+        validated_data.setdefault("is_superuser", True)
+        validated_data.setdefault("is_active", True)
+
         user = Usuario(**validated_data)
         if password:
             user.set_password(password)
